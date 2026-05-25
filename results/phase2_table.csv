@@ -1,0 +1,7 @@
+Variant,Type,Sparsity/Ratio,IoU,Dice,Size(MB),GPU ms,IoU Drop
+Baseline (FP32),—,—,0.7971607446670532,0.8609118910630544,17.514052,9.382173767089844,0.0
+unstruct_20pct,Unstructured,20%,0.8149,0.8752,17.51,11.11,-0.0177
+unstruct_40pct,Unstructured,40%,0.8123,0.8734,17.51,10.83,-0.0151
+unstruct_60pct,Unstructured,59%,0.812,0.8731,17.51,10.2,-0.0148
+unstruct_70pct,Unstructured,69%,0.8093,0.871,17.51,10.15,-0.0121
+struct_20pct,Structured,20% channels,0.8016,0.8636,11.59,8.63,-0.0044
