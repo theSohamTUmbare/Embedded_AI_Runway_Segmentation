@@ -97,28 +97,41 @@ pip install torch torchvision torch-pruning onnx onnxruntime onnxsim numpy matpl
 1. Open in Google Colab.
 2. Set pruned checkpoint path in **CELL 3**.
 3. Run all cells in order:
-   - CELL 6: Exports `runway_seg_pruned.onnx`
-   - CELL 7: Simplifies graph → `runway_seg_pruned_simplified.onnx`
+   - CELL 6: Exports runway_seg_pruned.onnx
+   - CELL 7: Simplifies graph → runway_seg_pruned_simplified.onnx (self-contained)
    - CELL 8: Verifies ONNX output matches PyTorch
    - CELL 9: CPU benchmark (expected ≈ 400–800 ms on Colab CPU)
    - CELL 10: Saves `phase5_onnx_predictions.png`
    - CELL 11: Generates `runway_seg_demo.html`
 4. **Expected output:** Segmentation predictions visualised; HTML demo file generated.
 
-### Step 4 — Run Browser Demo
-1. Place `runway_seg_demo.html` and `runway_seg_pruned_simplified.onnx` in the **same folder**.
-2. Serve locally:
-   ```bash
-   python -m http.server 8080
-   ```
-   Then open `http://localhost:8080/runway_seg_demo.html` in Chrome.
-3. Or serve via ngrok for phone access:
-   ```bash
-   ngrok http 8080
-   ```
-   Open the ngrok URL on your phone browser.
-4. Press **▶ Start Camera**, point at a runway image.
-5. **Expected output:** Live yellow mask overlay highlighting the runway region at ~0.7–1 FPS on mobile.
+### Step 4 — Run Demo (two options)
+This project provides two straightforward ways to run the demo: 1) Reproduce the full pipeline (train/prune/export), or 2) Run the browser demo directly using the prepared files in the `demo/` folder.
+
+- **A — Reproduce full pipeline (optional)**
+  - Follow Step 1 (training), Step 2 (pruning) and Step 3 (ONNX export) to regenerate model files from source.
+  - After Step 3 you should have `runway_seg_pruned_simplified.onnx` and `runway_seg_demo.html` available.
+
+- **B — Run demo directly (no build required)**
+  1. Ensure `runway_seg_demo.html` and `runway_seg_pruned_simplified.onnx` are together in the same folder (the `demo/` folder already contains these files).
+  2. Serve the `demo/` folder locally from the command line:
+     ```powershell
+     cd demo
+     python -m http.server 8080
+     ```
+     Open `http://localhost:8080/runway_seg_demo.html` in Chrome or another modern browser.
+  3. To run on a mobile device from your computer, expose the local server with ngrok (or similar):
+     ```powershell
+     ngrok http 8080
+     ```
+     Open the provided ngrok HTTPS URL on your phone browser.
+  4. In the demo page press **Start Camera** and grant camera permission. Point the camera at a runway image or printed test image.
+  5. Expected behaviour: live yellow mask overlay showing detected runway (mobile performance ≈ 0.6–1.0 FPS depending on device).
+
+**Notes for mobile/browser**
+- The demo uses ONNX Runtime Web (WASM backend). For best performance use Chrome or a Chromium-based browser on Android.
+- If you need slightly faster inference and can host with proper headers, enable cross-origin isolation and the multi-threaded WASM backend (not available on plain ngrok HTTP).
+- If camera access fails on mobile, open the ngrok URL over HTTPS (ngrok default) and ensure camera permissions are granted for that origin.
 
 ---
 
@@ -138,3 +151,12 @@ pip install torch torchvision torch-pruning onnx onnxruntime onnxsim numpy matpl
 - The browser demo **only works with `runway_seg_pruned_simplified.onnx`** (self-contained). The split `.onnx + .data` version requires server-side loading.
 - ONNX Runtime Web uses single-threaded WASM by default (multi-threading requires `crossOriginIsolated` headers not available on free ngrok).
 - Model input: `[1, 3, 512, 512]` float32, ImageNet-normalised. Output: `[1, 1, 512, 512]` logits.
+
+## Demo screenshots / Attach your results
+Place photos showing the demo running (phone screenshots or photos of the screen) inside this README where indicated. Replace the placeholder(s) below with your images (or attach them alongside this repository).
+
+## Phase 2 results table (CSV)
+
+The full pruning comparison table is included as a CSV in the repository. View or download it here: [results/phase2_table.csv](results/phase2_table.csv).
+
+If you prefer the table embedded in this README, paste a small excerpt or a screenshot here (replace one of the `<result_photo>` placeholders below with the exported image of the table).

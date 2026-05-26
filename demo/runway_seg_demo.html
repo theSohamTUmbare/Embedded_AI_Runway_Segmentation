@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Runway Segmentation — Embedded AI Demo</title>
+  <!-- Upgraded to 1.21.0 — 1.17.1 silently aborted on this model -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0d0d0d; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; }
+    #container { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+    video, #overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    video { max-width: 100%; max-height: 100%; object-fit: contain; z-index: 1; }
+    #overlay { z-index: 2; opacity: 0.75; pointer-events: none; max-width: 100%; max-height: 100%; }
+    #hud {
+      position: fixed; top: 12px; left: 12px; right: 12px;
+      background: rgba(0,0,0,0.65); border-radius: 12px; padding: 12px 16px;
+      z-index: 10; backdrop-filter: blur(8px);
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    }
+    .hud-title { font-weight: 600; font-size: 14px; color: #7DF9C0; }
+    .hud-stat { font-size: 12px; color: #ccc; }
+    .hud-stat b { color: #fff; }
+    #fps-badge {
+      background: #7DF9C0; color: #000; font-weight: 700;
+      font-size: 14px; padding: 4px 10px; border-radius: 20px;
+    }
+    #controls {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 12px; z-index: 10;
+    }
+    button {
+      padding: 12px 24px; border-radius: 24px; border: none; cursor: pointer;
+      font-size: 14px; font-weight: 600; transition: all .15s;
+    }
+    #btn-start  { background: #7DF9C0; color: #000; }
+    #btn-flip   { background: rgba(255,255,255,0.15); color: #fff; }
+    #btn-toggle { background: rgba(255,255,255,0.15); color: #fff; }
+    button:active { transform: scale(0.95); }
+    #status {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      text-align: center; z-index: 20; pointer-events: none;
+    }
+    #status h2 { font-size: 18px; margin-bottom: 8px; color: #7DF9C0; }
+    #status p  { font-size: 13px; color: #aaa; max-width: 280px; }
+    #loader { display: inline-block; width: 32px; height: 32px; border: 3px solid #333; border-top-color: #7DF9C0; border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #proc { display: none; }
+  </style>
+</head>
+<body>
+<div id="container">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+</div>
+
+<div id="hud" style="display:none">
+  <span class="hud-title">Runway Seg · DeepLabV3+-MobileNetV2 (pruned)</span>
+  <span class="hud-stat">INT8 · <b>11.6MB</b> · <b>2.90M</b> params</span>
+  <span id="fps-badge">-- FPS</span>
+</div>
+
+<div id="status">
+  <div id="loader"></div>
+  <h2>Loading model...</h2>
+  <p>Initialising ONNX Runtime and loading <b>11.6 MB</b> runway segmentation model</p>
+</div>
+
+<div id="controls">
+  <button id="btn-start" style="display:none">▶ Start Camera</button>
+  <button id="btn-flip"   style="display:none">⇄ Flip</button>
+  <button id="btn-toggle" style="display:none">◑ Toggle mask</button>
+</div>
+
+<canvas id="proc" style="display:none"></canvas>
+
+<script>
+// ── Use the self-contained simplified model (no .data sidecar needed) ─────────
+// runway_seg_pruned.onnx requires Module.MountedFiles which ORT Web WASM does
+// not support — only the fully-inlined simplified model works in a browser.
+const MODEL_URL = "runway_seg_pruned_simplified.onnx";
+const IMG_SIZE  = 512;
+const MEAN = [0.485, 0.456, 0.406];
+const STD  = [0.229, 0.224, 0.225];
+
+const MASK_R = 255, MASK_G = 255, MASK_B = 0;
+
+let session = null;
+let running = false;
+let facingMode = "environment";
+let showMask   = true;
+let lastFrameTs = 0;
+let fpsSmooth   = 0;
+
+const video      = document.getElementById("video");
+const overlay    = document.getElementById("overlay");
+const overlayCtx = overlay.getContext("2d", { willReadFrequently: false });
+const procCanvas = document.getElementById("proc");
+const procCtx    = procCanvas.getContext("2d", { willReadFrequently: true });
+const status     = document.getElementById("status");
+const hud        = document.getElementById("hud");
+const fpsBadge   = document.getElementById("fps-badge");
+
+async function loadModel() {
+  ort.env.logLevel    = "verbose";   // remove once confirmed working
+  ort.env.wasm.numThreads = 1;       // >1 needs crossOriginIsolated headers (ngrok lacks them)
+  ort.env.wasm.proxy  = false;
+  // Do NOT set ort.env.wasm.simd — deprecated in 1.21.0, ORT decides automatically
+
+  // Tell ORT exactly where its WASM binaries live.
+  // Without this, ORT searches your ngrok server for ort-wasm*.wasm — they're not there.
+  ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/";
+
+  document.querySelector("#status p").textContent = "Loading model...";
+
+  // URL-based loading: ORT streams the file directly into managed WASM memory.
+  // Passing an ArrayBuffer instead forces a double-copy (JS heap + WASM heap)
+  // which exhausts memory on models >~10 MB and causes silent abort crashes.
+  session = await ort.InferenceSession.create(MODEL_URL, {
+    executionProviders: ["wasm"],
+    graphOptimizationLevel: "all",
+  });
+
+  console.log("Model loaded ✓  inputs:", session.inputNames, "outputs:", session.outputNames);
+  document.querySelector("#status h2").textContent = "Model ready!";
+  document.querySelector("#status p").textContent  = "Press Start Camera to begin";
+  document.getElementById("loader").style.display  = "none";
+  document.getElementById("btn-start").style.display = "inline-block";
+}
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+
+    status.style.display = "none";
+    hud.style.display    = "flex";
+    document.getElementById("btn-start").style.display  = "none";
+    document.getElementById("btn-flip").style.display   = "inline-block";
+    document.getElementById("btn-toggle").style.display = "inline-block";
+
+    video.addEventListener("loadedmetadata", () => {
+      overlay.width  = video.videoWidth;
+      overlay.height = video.videoHeight;
+      overlay.style.width  = video.offsetWidth  + "px";
+      overlay.style.height = video.offsetHeight + "px";
+    });
+
+    running = true;
+    requestAnimationFrame(inferenceLoop);
+  } catch(e) {
+    document.querySelector("#status h2").textContent = "Camera error";
+    document.querySelector("#status p").textContent  = e.message;
+    status.style.display = "block";
+  }
+}
+
+function preprocessFrame() {
+  procCanvas.width  = IMG_SIZE;
+  procCanvas.height = IMG_SIZE;
+  procCtx.drawImage(video, 0, 0, IMG_SIZE, IMG_SIZE);
+  const {data} = procCtx.getImageData(0, 0, IMG_SIZE, IMG_SIZE);
+
+  const tensor = new Float32Array(3 * IMG_SIZE * IMG_SIZE);
+  const hw     = IMG_SIZE * IMG_SIZE;
+  for (let i = 0; i < hw; i++) {
+    tensor[         i] = (data[i*4]   / 255 - MEAN[0]) / STD[0];
+    tensor[    hw + i] = (data[i*4+1] / 255 - MEAN[1]) / STD[1];
+    tensor[2 * hw + i] = (data[i*4+2] / 255 - MEAN[2]) / STD[2];
+  }
+  return new ort.Tensor("float32", tensor, [1, 3, IMG_SIZE, IMG_SIZE]);
+}
+
+function drawMask(logits) {
+  const W = overlay.width;
+  const H = overlay.height;
+  const imgData = overlayCtx.createImageData(W, H);
+  const d = imgData.data;
+  const scaleX = IMG_SIZE / W;
+  const scaleY = IMG_SIZE / H;
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const logit = logits[Math.floor(y * scaleY) * IMG_SIZE + Math.floor(x * scaleX)];
+      const prob  = 1 / (1 + Math.exp(-logit));
+      if (prob > 0.5) {
+        const idx = (y * W + x) * 4;
+        d[idx]   = MASK_R;
+        d[idx+1] = MASK_G;
+        d[idx+2] = MASK_B;
+        d[idx+3] = Math.floor(prob * 200);
+      }
+    }
+  }
+  overlayCtx.putImageData(imgData, 0, 0);
+}
+
+async function inferenceLoop(timestamp) {
+  if (!running || !session) { running = false; return; }
+
+  try {
+    const inputTensor = preprocessFrame();
+    const t0 = performance.now();
+
+    const results = await session.run({ input: inputTensor });
+    const outData = results[session.outputNames[0]].data;
+    const ms      = performance.now() - t0;
+
+    if (showMask) drawMask(outData);
+    else overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+    if (lastFrameTs > 0) {
+      const fps = 1000 / (timestamp - lastFrameTs);
+      fpsSmooth = fpsSmooth * 0.85 + fps * 0.15;
+      fpsBadge.textContent = fpsSmooth.toFixed(1) + " FPS · " + ms.toFixed(0) + "ms";
+    } else {
+      fpsBadge.textContent = "starting...";
+    }
+    lastFrameTs = timestamp;
+
+  } catch(err) {
+    fpsBadge.textContent = "ERR";
+    fpsBadge.style.background = "#ff4444";
+    fpsBadge.style.color = "#fff";
+    console.error("Inference error:", err);
+    const title = document.querySelector("#hud .hud-title");
+    if (title) title.textContent = "Error: " + String(err.message || err).slice(0, 60);
+    hud.style.background = "rgba(80,0,0,0.8)";
+    running = false;
+  }
+
+  requestAnimationFrame(inferenceLoop);
+}
+
+document.getElementById("btn-start").addEventListener("click", startCamera);
+
+document.getElementById("btn-flip").addEventListener("click", async () => {
+  facingMode = facingMode === "environment" ? "user" : "environment";
+  video.srcObject?.getTracks().forEach(t => t.stop());
+  await startCamera();
+});
+
+document.getElementById("btn-toggle").addEventListener("click", () => {
+  showMask = !showMask;
+  if (!showMask) overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+});
+
+loadModel().catch(e => {
+  running = false;
+  document.querySelector("#status h2").textContent = "Model load failed";
+  document.querySelector("#status p").textContent  = e.message || String(e);
+  document.getElementById("loader").style.borderTopColor = "#ff4444";
+  document.getElementById("loader").style.animation = "none";
+  console.error("loadModel failed:", e);
+});
+</script>
+</body>
+</html>
