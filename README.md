@@ -73,7 +73,39 @@ pip install torch torchvision torch-pruning onnx onnxruntime onnxsim numpy matpl
 
 ---
 
+## Demo screenshots 
+Since real-world aerial access to runways was unavailable during testing, we validated the application using a "hardware-in-the-loop" approach. We displayed high-resolution aerial runway imagery on a laptop screen and captured the live segmentation output using the mobile application.
+
+![testrunway](results/testrunway1.jpeg)
+![testrunway](results/testrunway2.jpeg)
+![testrunway](results/testrunway3.jpeg)
+
 ## Steps to Run
+
+### Run demo Directly 
+**Run demo directly (no build required)**
+  1. `demo` file already have all the required files. `runway_seg_demo.html` and `runway_seg_pruned_simplified.onnx` are together in the same folder (the `demo/` folder already contains these files).
+  2. Serve the `demo/` folder locally from the command line:
+     ```powershell
+     cd demo
+     python -m http.server 8080
+     ```
+     Open `http://localhost:8080/runway_seg_demo.html` in Chrome or another modern browser.
+  3. To run on a mobile device from your computer, expose the local server with ngrok (or similar):
+     ```powershell
+     ngrok http 8080
+     ```
+     Open the provided ngrok HTTPS URL on your phone browser.
+  4. In the demo page press **Start Camera** and grant camera permission. Point the camera at a runway image or printed test image.
+  5. Expected behaviour: live yellow mask overlay showing detected runway (mobile performance ≈ 0.6–1.0 FPS depending on device).
+
+**Notes for mobile/browser**
+- The demo uses ONNX Runtime Web (WASM backend). For best performance use Chrome or a Chromium-based browser on Android.
+- If you need slightly faster inference and can host with proper headers, enable cross-origin isolation and the multi-threaded WASM backend (not available on plain ngrok HTTP).
+- If camera access fails on mobile, open the ngrok URL over HTTPS (ngrok default) and ensure camera permissions are granted for that origin.
+
+
+## If you are interested in reproducing the work follow the following steps
 
 ### Step 1 — Train Baseline Model (`EAI_ruway1.ipynb`)
 1. Open in Google Colab.
@@ -105,34 +137,7 @@ pip install torch torchvision torch-pruning onnx onnxruntime onnxsim numpy matpl
    - CELL 11: Generates `runway_seg_demo.html`
 4. **Expected output:** Segmentation predictions visualised; HTML demo file generated.
 
-### Step 4 — Run Demo (two options)
-This project provides two straightforward ways to run the demo: 1) Reproduce the full pipeline (train/prune/export), or 2) Run the browser demo directly using the prepared files in the `demo/` folder.
-
-- **A — Reproduce full pipeline (optional)**
-  - Follow Step 1 (training), Step 2 (pruning) and Step 3 (ONNX export) to regenerate model files from source.
-  - After Step 3 you should have `runway_seg_pruned_simplified.onnx` and `runway_seg_demo.html` available.
-
-- **B — Run demo directly (no build required)**
-  1. Ensure `runway_seg_demo.html` and `runway_seg_pruned_simplified.onnx` are together in the same folder (the `demo/` folder already contains these files).
-  2. Serve the `demo/` folder locally from the command line:
-     ```powershell
-     cd demo
-     python -m http.server 8080
-     ```
-     Open `http://localhost:8080/runway_seg_demo.html` in Chrome or another modern browser.
-  3. To run on a mobile device from your computer, expose the local server with ngrok (or similar):
-     ```powershell
-     ngrok http 8080
-     ```
-     Open the provided ngrok HTTPS URL on your phone browser.
-  4. In the demo page press **Start Camera** and grant camera permission. Point the camera at a runway image or printed test image.
-  5. Expected behaviour: live yellow mask overlay showing detected runway (mobile performance ≈ 0.6–1.0 FPS depending on device).
-
-**Notes for mobile/browser**
-- The demo uses ONNX Runtime Web (WASM backend). For best performance use Chrome or a Chromium-based browser on Android.
-- If you need slightly faster inference and can host with proper headers, enable cross-origin isolation and the multi-threaded WASM backend (not available on plain ngrok HTTP).
-- If camera access fails on mobile, open the ngrok URL over HTTPS (ngrok default) and ensure camera permissions are granted for that origin.
-
+ 
 ---
 
 ## Expected Outputs for Verification
@@ -152,11 +157,7 @@ This project provides two straightforward ways to run the demo: 1) Reproduce the
 - ONNX Runtime Web uses single-threaded WASM by default (multi-threading requires `crossOriginIsolated` headers not available on free ngrok).
 - Model input: `[1, 3, 512, 512]` float32, ImageNet-normalised. Output: `[1, 1, 512, 512]` logits.
 
-## Demo screenshots / Attach your results
-Place photos showing the demo running (phone screenshots or photos of the screen) inside this README where indicated. Replace the placeholder(s) below with your images (or attach them alongside this repository).
 
 ## Phase 2 results table (CSV)
 
 The full pruning comparison table is included as a CSV in the repository. View or download it here: [results/phase2_table.csv](results/phase2_table.csv).
-
-If you prefer the table embedded in this README, paste a small excerpt or a screenshot here (replace one of the `<result_photo>` placeholders below with the exported image of the table).
